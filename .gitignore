@@ -1,0 +1,29 @@
+# 敏感信息配置
+config/secrets.json
+
+# Python 字节码文件
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 日志文件
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 虚拟环境
+venv/
+env/
+.env/
+
+# 临时文件
+*.tmp
+
+# 音频输出目录
+audio_output/
+transcripts/
+
+# 配置文件
+audio_app_config.json
