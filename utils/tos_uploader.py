@@ -92,18 +92,67 @@ class TosUploader:
         try:
             self.logger.info(f"开始上传: {file_path} -> {object_key}")
             
-            # 定义进度回调
-            def upload_progress(consumed_bytes, total_bytes, rw_once_bytes, type):
-                if total_bytes and progress_callback:
+            # 获取文件大小
+            file_size = os.path.getsize(file_path)
+            self.logger.info(f"文件大小: {file_size} 字节")
+            
+            # 定义优化后的进度回调
+            class ProgressTracker:
+                def __init__(self):
+                    self.last_progress = -1
+                    self.start_time = datetime.now()
+                    self.last_update_time = self.start_time
+                    self.last_bytes = 0
+                    self.update_interval = 2  # 2秒更新一次
+                
+                def track_progress(self, consumed_bytes, total_bytes, rw_once_bytes, type):
+                    if not total_bytes:
+                        return
+                        
+                    current_time = datetime.now()
+                    elapsed = (current_time - self.last_update_time).total_seconds()
+                    
+                    # 计算当前进度
                     progress = int(100 * float(consumed_bytes) / float(total_bytes))
-                    progress_callback(progress, f"已上传: {consumed_bytes}/{total_bytes} 字节")
+                    
+                    # 只在以下情况更新：
+                    # 1. 进度改变了
+                    # 2. 或者距离上次更新超过了指定时间
+                    # 3. 或者是最后一次更新（100%）
+                    if (progress != self.last_progress or 
+                        elapsed >= self.update_interval or 
+                        progress == 100):
+                        
+                        # 计算上传速度
+                        if elapsed > 0:
+                            bytes_delta = consumed_bytes - self.last_bytes
+                            speed = bytes_delta / elapsed / 1024 / 1024  # MB/s
+                            
+                            # 格式化速度
+                            if speed >= 1:
+                                speed_str = f"{speed:.2f} MB/s"
+                            else:
+                                speed_str = f"{speed * 1024:.2f} KB/s"
+                            
+                            message = f"已上传: {consumed_bytes}/{total_bytes} 字节 ({speed_str})"
+                        else:
+                            message = f"已上传: {consumed_bytes}/{total_bytes} 字节"
+                        
+                        if progress_callback:
+                            progress_callback(progress, message)
+                        
+                        self.last_progress = progress
+                        self.last_update_time = current_time
+                        self.last_bytes = consumed_bytes
+            
+            progress_tracker = ProgressTracker()
             
             # 上传文件
             result = self.client.put_object_from_file(
                 self.bucket, 
                 object_key, 
                 file_path,
-                data_transfer_listener=upload_progress if progress_callback else None
+                data_transfer_listener=progress_tracker.track_progress if progress_callback else None
             )
             
             self.logger.info(f"上传成功: {file_path}, 状态码: {result.status_code}")
