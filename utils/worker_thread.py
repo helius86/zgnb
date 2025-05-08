@@ -38,6 +38,26 @@ class WorkerThread(QThread):
         self.result = None
         self.cancelled = False
         self.logger = logging.getLogger("WorkerThread")
+        
+        # 创建一个不直接写入UI的logger
+        self._setup_thread_logger()
+
+    def _setup_thread_logger(self):
+        """设置线程安全的日志记录器"""
+        # 这个logger不会直接写入UI，而是通过信号发送日志消息
+        self.thread_logger = logging.getLogger(f"WorkerThread_{id(self)}")
+        
+        # 移除所有可能的处理器，确保不会直接写入UI
+        for handler in self.thread_logger.handlers[:]:
+            self.thread_logger.removeHandler(handler)
+        
+        # 添加自定义处理器，将日志消息转发为信号
+        handler = logging.Handler()
+        handler.emit = lambda record: self.log_message.emit(record.getMessage(), record.levelno)
+        self.thread_logger.addHandler(handler)
+        
+        # 确保日志级别足够低，能捕获所有消息
+        self.thread_logger.setLevel(logging.DEBUG)
 
     def run(self):
         """执行任务"""
@@ -55,9 +75,12 @@ class WorkerThread(QThread):
             # 记录错误并发出失败信号
             error_msg = str(e)
             trace = traceback.format_exc()
-            self.logger.exception("任务执行出错")
+            
+            # 使用线程安全的方式记录日志
+            self.thread_logger.exception("任务执行出错")
             self.log_message.emit(f"错误: {error_msg}", logging.ERROR)
             self.log_message.emit(f"详细错误信息: {trace}", logging.DEBUG)
+            
             self.task_finished.emit(False, error_msg)
 
     def update_progress(self, progress, message=""):
@@ -80,4 +103,3 @@ class WorkerThread(QThread):
         self.cancelled = True
         self.log_message.emit("任务已取消", logging.WARNING)
         # 不立即终止线程，让它自然结束，避免资源泄漏
-        # 任务函数应当检查cancelled状态并适当退出

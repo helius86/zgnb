@@ -75,35 +75,85 @@ class AudioProcessor:
             self.logger.error(f"找不到FFmpeg，请安装FFmpeg或提供正确的路径（当前路径: {self.ffmpeg_path}）")
             raise
             
-    def get_video_duration(self, video_path):
+    def get_video_duration(self, file_path):
         """
-        获取视频时长（秒）
+        获取视频或音频文件时长（秒）
         
         参数:
-            video_path (str): 视频文件路径
+            file_path (str): 文件路径
             
         返回:
-            float: 视频时长（秒）
+            float: 文件时长（秒）
         """
         try:
+            # 对于m4a文件，使用ffprobe直接获取时长
+            file_ext = os.path.splitext(file_path)[1].lower()
+            
+            if file_ext in ['.m4a', '.mp3', '.wav', '.ogg', '.flac']:
+                # 使用ffprobe获取音频时长
+                cmd = [
+                    self.ffmpeg_path.replace('ffmpeg', 'ffprobe'),  # 使用ffprobe
+                    "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    file_path
+                ]
+                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                if result.returncode == 0:
+                    try:
+                        duration = float(result.stdout.strip())
+                        self.logger.debug(f"文件 {os.path.basename(file_path)} 时长: {duration} 秒")
+                        return duration
+                    except ValueError:
+                        self.logger.error(f"无法解析时长信息: {result.stdout}")
+                        return 0
+                else:
+                    self.logger.error(f"获取文件时长失败: {result.stderr}")
+            
+            # 回退到原来的方法
             cmd = [
                 self.ffmpeg_path, 
-                "-i", video_path, 
+                "-i", file_path, 
                 "-v", "quiet", 
                 "-show_entries", "format=duration", 
                 "-of", "json"
             ]
             result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             if result.returncode != 0:
-                self.logger.error(f"获取视频时长失败: {result.stderr}")
+                self.logger.error(f"获取文件时长失败: {result.stderr}")
                 return 0
             
             output = json.loads(result.stdout)
             duration = float(output['format']['duration'])
-            self.logger.debug(f"视频 {os.path.basename(video_path)} 时长: {duration} 秒")
+            self.logger.debug(f"文件 {os.path.basename(file_path)} 时长: {duration} 秒")
             return duration
         except Exception as e:
-            self.logger.error(f"获取视频 {os.path.basename(video_path)} 时长时出错: {str(e)}")
+            self.logger.error(f"获取文件 {os.path.basename(file_path)} 时长时出错: {str(e)}")
+            
+            # 如果上述方法都失败，尝试使用直接的ffmpeg命令
+            try:
+                cmd = [
+                    self.ffmpeg_path,
+                    "-i", file_path
+                ]
+                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                stderr_output = result.stderr
+                
+                # 从ffmpeg错误输出中解析时长信息
+                duration_match = None
+                for line in stderr_output.split('\n'):
+                    if 'Duration:' in line:
+                        time_str = line.split('Duration:')[1].split(',')[0].strip()
+                        h, m, s = map(float, time_str.split(':'))
+                        duration_match = h * 3600 + m * 60 + s
+                        break
+                
+                if duration_match:
+                    self.logger.info(f"通过备用方法获取到文件时长: {duration_match} 秒")
+                    return duration_match
+            except Exception as backup_error:
+                self.logger.error(f"备用方法获取时长失败: {str(backup_error)}")
+            
             return 0
             
     def extract_audio(self, video_path, output_path=None, progress_callback=None):
@@ -210,13 +260,19 @@ class AudioProcessor:
             self.logger.error(f"提取音频时出错: {str(e)}")
             return None
             
-    def split_audio(self, audio_path, progress_callback=None):
+    def split_audio(self, audio_path, progress_callback=None, filename_format=None):
         """
         将长音频文件分割为指定时长的片段
         
         参数:
             audio_path (str): 音频文件路径
             progress_callback (callable, optional): 进度回调函数
+            filename_format (str, optional): 输出文件名格式，支持变量：
+                {filename} - 原文件名
+                {index} - 片段序号
+                {start_time} - 开始时间(秒)
+                {end_time} - 结束时间(秒)
+                {duration} - 片段时长(秒)
             
         返回:
             list: 分割后的音频片段路径列表
@@ -232,20 +288,25 @@ class AudioProcessor:
         
         # 获取音频时长
         cmd = [
-            self.ffmpeg_path, 
-            "-i", audio_path, 
-            "-v", "quiet", 
-            "-show_entries", "format=duration", 
-            "-of", "json"
+            self.ffmpeg_path.replace('ffmpeg', 'ffprobe'), 
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            audio_path
         ]
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         
         if result.returncode != 0:
             self.logger.error(f"获取音频时长失败: {result.stderr}")
+            self.logger.warning("无法分割音频，将返回原始文件")
             return [audio_path]  # 返回原始文件
         
-        output = json.loads(result.stdout)
-        duration = float(output['format']['duration'])
+        try:
+            duration = float(result.stdout.strip())
+            self.logger.debug(f"音频文件 {os.path.basename(audio_path)} 时长: {duration} 秒")
+        except ValueError:
+            self.logger.error(f"无法解析时长信息: {result.stdout}")
+            return [audio_path]
         
         # 如果音频时长小于分段时长，不需要分割
         if duration <= self.segment_duration:
@@ -261,24 +322,75 @@ class AudioProcessor:
         
         # 确保输出目录存在
         output_dir = os.path.dirname(audio_path)
+        if self.output_dir:
+            output_dir = self.output_dir
+            os.makedirs(output_dir, exist_ok=True)
         
-        # 分割音频
+        # 获取基本文件名（不带扩展名）
         audio_basename = os.path.splitext(os.path.basename(audio_path))[0]
+        
+        # 默认文件名格式
+        if not filename_format:
+            filename_format = "{filename}_segment_{index}"
+            
         segments = []
+        
+        # 打印调试信息
+        self.logger.debug(f"开始分割：文件={audio_path}, 总时长={duration}秒, 分段时长={self.segment_duration}秒")
+        self.logger.debug(f"输出目录: {output_dir}, 文件名格式: {filename_format}")
         
         for i in range(segment_count):
             start_time = i * self.segment_duration
-            segment_path = os.path.join(output_dir, f"{audio_basename}_segment_{i+1}.{self.audio_format}")
+            end_time = min((i + 1) * self.segment_duration, duration)
+            segment_duration = end_time - start_time
             
+            # 格式化文件名
+            segment_filename = filename_format.format(
+                filename=audio_basename,
+                index=i+1,
+                start_time=int(start_time),
+                end_time=int(end_time),
+                duration=int(segment_duration)
+            )
+            
+            # 确保文件名有效
+            segment_filename = "".join(c for c in segment_filename if c.isalnum() or c in "_-. ")
+            
+            segment_path = os.path.join(output_dir, f"{segment_filename}.{self.audio_format}")
+            
+            # 检查文件格式，为m4a文件添加特殊处理
+            file_ext = os.path.splitext(audio_path)[1].lower()
+            
+            # 构建ffmpeg命令
             cmd = [
                 self.ffmpeg_path,
                 "-y",  # 覆盖输出文件
                 "-i", audio_path,
                 "-ss", str(start_time),  # 开始时间
-                "-t", str(self.segment_duration),  # 片段时长
-                "-c:a", "copy",  # 直接复制音频流，不重新编码
-                segment_path
             ]
+            
+            # 添加结束时间
+            cmd.extend(["-to", str(end_time)])  # 结束时间，使用-to代替-t
+            
+            # 对于m4a文件，需要特殊处理
+            if file_ext == '.m4a':
+                # 使用AAC编码器而不是直接复制
+                cmd.extend([
+                    "-acodec", "libmp3lame" if self.audio_format == 'mp3' else "aac",
+                    "-ar", str(self.audio_sample_rate),
+                    "-ab", self.audio_bitrate
+                ])
+            else:
+                # 非m4a文件，直接复制音频流
+                cmd.append("-c:a")
+                cmd.append("copy")
+            
+            # 添加输出路径
+            cmd.append(segment_path)
+            
+            # 打印调试信息
+            cmd_str = " ".join(cmd)
+            self.logger.debug(f"执行命令: {cmd_str}")
             
             if progress_callback:
                 progress = int((i / segment_count) * 100)
@@ -292,8 +404,12 @@ class AudioProcessor:
                     self.logger.error(f"分割音频片段失败: {result.stderr}")
                     continue
                 
-                segments.append(segment_path)
-                self.logger.info(f"成功分割音频片段: {segment_path}")
+                # 检查文件是否创建成功
+                if os.path.exists(segment_path) and os.path.getsize(segment_path) > 0:
+                    segments.append(segment_path)
+                    self.logger.info(f"成功分割音频片段: {segment_path}")
+                else:
+                    self.logger.error(f"分割后的文件不存在或大小为0: {segment_path}")
                 
             except Exception as e:
                 self.logger.error(f"分割音频片段时出错: {str(e)}")
@@ -301,7 +417,96 @@ class AudioProcessor:
         if progress_callback:
             progress_callback(100, f"完成分割，共 {len(segments)} 个片段")
         
+        # 如果没有成功分割任何片段，返回原始文件
+        if not segments:
+            self.logger.warning("没有成功分割任何片段，返回原始文件")
+            return [audio_path]
+            
         return segments
+    
+    def process_audio(self, audio_path, progress_callback=None, filename_format=None):
+        """
+        处理单个音频文件：根据需要分割
+        
+        参数:
+            audio_path (str): 音频文件路径
+            progress_callback (callable, optional): 进度回调函数
+            filename_format (str, optional): 输出文件名格式
+            
+        返回:
+            dict: 处理结果，包含原始音频信息和分割的片段
+        """
+        audio_basename = os.path.basename(audio_path)
+        self.logger.info(f"开始处理音频: {audio_basename}")
+        
+        if progress_callback:
+            progress_callback(0, f"开始处理音频: {audio_basename}")
+        
+        # 准备输出目录
+        audio_dir = os.path.dirname(audio_path)
+        output_dir = self.output_dir if self.output_dir else audio_dir
+        os.makedirs(output_dir, exist_ok=True)
+        self.output_dir = output_dir
+        
+        result = {
+            "audio": {
+                "path": audio_path,
+                "name": audio_basename,
+                "duration": self.get_video_duration(audio_path)  # 这个方法也适用于获取音频时长
+            },
+            "segments": [],
+            "output_dir": output_dir,
+            "metadata": {
+                "processed_time": datetime.now().isoformat(),
+                "settings": {
+                    "segment_duration": self.segment_duration,
+                    "audio_format": self.audio_format,
+                    "audio_bitrate": self.audio_bitrate,
+                    "audio_channels": self.audio_channels,
+                    "audio_sample_rate": self.audio_sample_rate,
+                    "noise_reduction": self.noise_reduction,
+                    "normalize_volume": self.normalize_volume,
+                    "filename_format": filename_format or "{filename}_segment_{index}"
+                }
+            }
+        }
+        
+        # 分割音频，进度占100%
+        def split_progress(p, msg):
+            if progress_callback:
+                progress_callback(p, msg)
+        
+        # 分割音频
+        audio_segments = self.split_audio(audio_path, progress_callback=split_progress, filename_format=filename_format)
+        result["segments"] = audio_segments
+        
+        # 生成每个片段的时间信息
+        segment_info = []
+        for i, segment_path in enumerate(audio_segments):
+            start_time = i * self.segment_duration
+            end_time = min((i + 1) * self.segment_duration, result["audio"]["duration"])
+            
+            segment_info.append({
+                "path": segment_path,
+                "name": os.path.basename(segment_path),
+                "start_time": start_time,
+                "end_time": end_time,
+                "duration": end_time - start_time,
+                "index": i + 1
+            })
+        
+        result["segment_info"] = segment_info
+        
+        # 保存元数据
+        metadata_path = os.path.join(output_dir, f"{os.path.splitext(audio_basename)[0]}_metadata.json")
+        with open(metadata_path, 'w', encoding='utf-8') as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        
+        self.logger.info(f"音频处理完成: {audio_basename}")
+        if progress_callback:
+            progress_callback(100, f"处理完成: {audio_basename}")
+        
+        return result
         
     def process_video(self, video_path, progress_callback=None):
         """

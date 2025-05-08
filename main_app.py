@@ -19,6 +19,7 @@ from ui_components.extraction_tab import ExtractionTab
 from ui_components.upload_tab import UploadTab
 from ui_components.transcription_tab import TranscriptionTab
 from ui_components.settings_tab import SettingsTab
+from ui_components.split_audio_tab import SplitAudioTab  # 导入新的音频分割选项卡
 from utils.config_manager import ConfigManager
 
 # 配置日志记录
@@ -61,6 +62,10 @@ class MainWindow(QMainWindow):
         self.extraction_tab = ExtractionTab(self.config)
         tab_widget.addTab(self.extraction_tab, "音频提取")
         
+        # 添加新的音频分割选项卡
+        self.split_audio_tab = SplitAudioTab(self.config)
+        tab_widget.addTab(self.split_audio_tab, "音频分割")
+        
         self.upload_tab = UploadTab(self.config)
         tab_widget.addTab(self.upload_tab, "TOS上传")
         
@@ -84,6 +89,7 @@ class MainWindow(QMainWindow):
     def update_config(self):
         """更新所有选项卡的配置"""
         self.extraction_tab.update_config(self.config)
+        self.split_audio_tab.update_config(self.config)  # 更新音频分割选项卡配置
         self.upload_tab.update_config(self.config)
         self.transcription_tab.update_config(self.config)
     
@@ -111,6 +117,8 @@ class MainWindow(QMainWindow):
         
         if self.extraction_tab.is_running:
             active_tasks.append("音频提取")
+        if self.split_audio_tab.is_running:  # 检查音频分割任务
+            active_tasks.append("音频分割")
         if self.upload_tab.is_running:
             active_tasks.append("TOS上传")
         if self.transcription_tab.is_running:
@@ -129,6 +137,8 @@ class MainWindow(QMainWindow):
                 # 停止所有运行中的任务
                 if self.extraction_tab.is_running:
                     self.extraction_tab.cancel_task()
+                if self.split_audio_tab.is_running:  # 取消音频分割任务
+                    self.split_audio_tab.cancel_task()
                 if self.upload_tab.is_running:
                     self.upload_tab.cancel_task()
                 if self.transcription_tab.is_running:
