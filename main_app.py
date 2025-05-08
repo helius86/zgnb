@@ -76,6 +76,9 @@ class MainWindow(QMainWindow):
         # 连接信号
         self.settings_tab.config_updated.connect(self.update_config)
         
+        # 新增：连接上传选项卡和转录选项卡之间的信号
+        self.upload_tab.send_to_transcription_signal.connect(self.handle_send_to_transcription)
+        
         logger.info("应用程序界面初始化完成")
     
     def update_config(self):
@@ -83,6 +86,24 @@ class MainWindow(QMainWindow):
         self.extraction_tab.update_config(self.config)
         self.upload_tab.update_config(self.config)
         self.transcription_tab.update_config(self.config)
+    
+    def handle_send_to_transcription(self, urls):
+        """处理从上传选项卡发送到转录选项卡的URL"""
+        # 将URL传递给转录选项卡
+        self.transcription_tab.load_uploaded_urls(urls)
+        
+        # 切换到转录选项卡
+        current_widget = self.centralWidget()
+        if current_widget:
+            tab_widget = current_widget.findChild(QTabWidget)
+            if tab_widget:
+                # 查找转录选项卡的索引
+                for i in range(tab_widget.count()):
+                    if tab_widget.widget(i) == self.transcription_tab:
+                        tab_widget.setCurrentIndex(i)
+                        break
+        
+        logger.info(f"已将 {len(urls)} 个URL发送到转录选项卡")
         
     def closeEvent(self, event):
         """关闭窗口前确认是否有正在运行的任务"""

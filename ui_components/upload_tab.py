@@ -26,6 +26,7 @@ class UploadTab(QWidget):
     
     # 定义信号
     log_message = pyqtSignal(str, int)  # 消息和日志级别
+    send_to_transcription_signal = pyqtSignal(list)  # 新增：发送URL到转录功能
     
     def __init__(self, config):
         super().__init__()
@@ -117,9 +118,16 @@ class UploadTab(QWidget):
         self.copy_urls_btn = QPushButton("复制所有URL")
         self.copy_urls_btn.clicked.connect(self.copy_urls)
         self.copy_urls_btn.setEnabled(False)
+        
+        # 新增：发送到批量转录按钮
+        self.send_to_transcribe_btn = QPushButton("发送到批量转录")
+        self.send_to_transcribe_btn.clicked.connect(self.send_to_transcription)
+        self.send_to_transcribe_btn.setEnabled(False)
+        
         button_layout.addWidget(self.start_btn)
         button_layout.addWidget(self.cancel_btn)
         button_layout.addWidget(self.copy_urls_btn)
+        button_layout.addWidget(self.send_to_transcribe_btn)
         layout.addLayout(button_layout)
         
         # 进度条
@@ -376,6 +384,7 @@ class UploadTab(QWidget):
         self.start_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.copy_urls_btn.setEnabled(False)
+        self.send_to_transcribe_btn.setEnabled(False)  # 禁用发送到转录按钮
         self.progress.setValue(0)
         self.is_running = True
         
@@ -467,9 +476,10 @@ class UploadTab(QWidget):
                     self.result_output.append(f"<p><b>{file_name}</b>: <span style='color:red'>上传失败</span></p>")
                 self.result_output.append("<hr>")
             
-            # 启用复制URL按钮
+            # 启用复制URL和发送到转录按钮
             if success_count > 0:
                 self.copy_urls_btn.setEnabled(True)
+                self.send_to_transcribe_btn.setEnabled(True)  # 启用发送到转录按钮
             
             # 显示完成消息
             self.logger.info(f"上传完成，总计: {len(result)}，成功: {success_count}，失败: {fail_count}")
@@ -512,3 +522,26 @@ class UploadTab(QWidget):
         except Exception as e:
             self.logger.error(f"复制URL失败: {e}")
             QMessageBox.warning(self, "复制失败", f"复制URL到剪贴板失败: {e}")
+    
+    def send_to_transcription(self):
+        """将上传成功的URL发送到批量转录选项卡"""
+        if not self.upload_results:
+            QMessageBox.warning(self, "没有可发送的URL", "当前没有上传成功的文件URL")
+            return
+        
+        # 提取成功上传的URL
+        successful_urls = [url for url in self.upload_results.values() if url]
+        
+        if not successful_urls:
+            QMessageBox.warning(self, "没有可发送的URL", "没有成功上传的文件URL")
+            return
+        
+        # 发送信号
+        self.send_to_transcription_signal.emit(successful_urls)
+        
+        self.logger.info(f"已发送 {len(successful_urls)} 个URL到批量转录")
+        QMessageBox.information(
+            self, 
+            "发送成功", 
+            f"已发送 {len(successful_urls)} 个文件URL到批量转录选项卡\n请切换到批量转录选项卡查看"
+        )

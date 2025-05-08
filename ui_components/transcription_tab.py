@@ -32,6 +32,7 @@ class TranscriptionTab(QWidget):
         self.worker = None
         self.is_running = False
         self.file_urls = []  # 要转录的文件URL列表
+        self.pending_urls = []  # 存储待接收的URL
         
         # 设置界面
         self.setup_ui()
@@ -76,9 +77,16 @@ class TranscriptionTab(QWidget):
         self.clear_url_btn.clicked.connect(self.clear_urls)
         self.parse_url_btn = QPushButton("解析URL列表")
         self.parse_url_btn.clicked.connect(self.parse_urls)
+        
+        # 新增：接收从上传页面传来的URL按钮
+        self.receive_urls_btn = QPushButton("接收上传的URL")
+        self.receive_urls_btn.clicked.connect(self.receive_uploaded_urls)
+        self.receive_urls_btn.setEnabled(False)  # 初始禁用，有URL时才启用
+        
         url_btn_layout.addWidget(self.load_url_file_btn)
         url_btn_layout.addWidget(self.clear_url_btn)
         url_btn_layout.addWidget(self.parse_url_btn)
+        url_btn_layout.addWidget(self.receive_urls_btn)
         url_layout.addLayout(url_btn_layout)
         
         url_group.setLayout(url_layout)
@@ -290,6 +298,47 @@ class TranscriptionTab(QWidget):
         self.logger.info(f"解析出 {len(valid_urls)} 个有效URL")
         QMessageBox.information(self, "解析完成", f"成功解析 {len(valid_urls)} 个有效URL\n已更新文件列表")
     
+    def receive_uploaded_urls(self):
+        """接收从上传选项卡传来的URL"""
+        if not self.pending_urls:
+            QMessageBox.information(self, "没有待接收的URL", "当前没有从上传功能传入的URL")
+            return
+        
+        # 询问用户是要替换还是追加
+        reply = QMessageBox.question(
+            self,
+            "接收URL",
+            f"从上传功能接收到 {len(self.pending_urls)} 个URL\n\n"
+            "是：替换当前URL列表\n"
+            "否：追加到当前URL列表",
+            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+            QMessageBox.Yes
+        )
+        
+        if reply == QMessageBox.Cancel:
+            return
+        
+        if reply == QMessageBox.Yes:
+            # 替换
+            self.url_input.clear()
+            self.url_input.setPlainText("\n".join(self.pending_urls))
+        else:
+            # 追加
+            current_text = self.url_input.toPlainText().strip()
+            if current_text:
+                current_text += "\n"
+            current_text += "\n".join(self.pending_urls)
+            self.url_input.setPlainText(current_text)
+        
+        # 清空待接收列表
+        self.pending_urls = []
+        self.receive_urls_btn.setEnabled(False)
+        
+        # 自动解析URL
+        self.parse_urls()
+        
+        self.logger.info(f"已接收并解析上传的URL")
+    
     def browse_output_dir(self):
         """浏览选择输出目录"""
         dir_path = QFileDialog.getExistingDirectory(
@@ -463,3 +512,24 @@ class TranscriptionTab(QWidget):
                 "转录失败",
                 f"转录过程中发生错误:\n{error_msg}"
             )
+    
+    # 新增方法：用于接收从其他选项卡传来的URL
+    def load_uploaded_urls(self, urls):
+        """接收从上传选项卡传来的URL
+        
+        参数:
+            urls (list): URL列表
+        """
+        if not urls:
+            return
+            
+        self.pending_urls = urls
+        self.receive_urls_btn.setEnabled(True)
+        
+        # 显示提示消息
+        self.logger.info(f"收到 {len(urls)} 个来自上传功能的URL")
+        QMessageBox.information(
+            self,
+            "收到新的URL",
+            f"收到来自上传功能的 {len(urls)} 个URL\n请点击'接收上传的URL'按钮添加到转录列表"
+        )
