@@ -31,16 +31,23 @@ DEFAULT_CONFIG = {
     
     # 文件路径配置
     "last_input_dir": "",  # 上次使用的输入目录
-    "last_output_dir": ""   # 上次使用的输出目录
+    "last_output_dir": "",   # 上次使用的输出目录
+    
+    # AI分析配置
+    "last_analysis_dir": "",  # 上次选择的分析目录
+    "claude_model": "claude-3-haiku-20240307"  # Claude模型版本
 }
 
 class ConfigManager:
     """配置管理类，负责加载、保存和管理应用程序配置"""
     
+    # 类常量，便于其他模块访问
+    DEFAULT_CONFIG = DEFAULT_CONFIG
+    
     def __init__(self):
         self.logger = logging.getLogger("ConfigManager")
         self.config = DEFAULT_CONFIG.copy()
-        self.secrets = {"api": {}, "tos": {}}
+        self.secrets = {"api": {}, "tos": {}, "claude": {}}
         self.load_config()
         self.load_secrets()
     
@@ -50,14 +57,23 @@ class ConfigManager:
             if os.path.exists(SECRETS_FILE):
                 with open(SECRETS_FILE, 'r', encoding='utf-8') as f:
                     self.secrets = json.load(f)
+                    
+                # 确保所有必要的sections存在
+                if "claude" not in self.secrets:
+                    self.secrets["claude"] = {}
+                if "api" not in self.secrets:
+                    self.secrets["api"] = {}
+                if "tos" not in self.secrets:
+                    self.secrets["tos"] = {}
+                    
                 self.logger.info("敏感信息配置文件加载成功")
             else:
                 self.logger.warning(f"敏感信息配置文件 {SECRETS_FILE} 不存在，将使用空配置")
                 # 创建默认的空结构
-                self.secrets = {"api": {}, "tos": {}}
+                self.secrets = {"api": {}, "tos": {}, "claude": {}}
         except Exception as e:
             self.logger.error(f"加载敏感信息配置文件失败: {e}")
-            self.secrets = {"api": {}, "tos": {}}
+            self.secrets = {"api": {}, "tos": {}, "claude": {}}
     
     def load_config(self):
         """从文件加载配置"""
