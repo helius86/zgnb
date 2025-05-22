@@ -9,3 +9,4 @@ from .log_handler import setup_logger, QTextEditLogger
 from .audio_processor import AudioProcessor
 from .tos_uploader import TosUploader, HAS_TOS
 from .transcription_service import TranscriptionService
+from .claude_service import ClaudeService
